@@ -1,0 +1,31 @@
+# Systemd unit-файл — альтернатива Docker.
+# Установка:
+#   sudo cp deploy/tg-solver-bot.service /etc/systemd/system/
+#   # создайте пользователя и каталоги (см. README), поправьте пути при необходимости
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now tg-solver-bot
+
+[Unit]
+Description=Telegram solver bot (aiogram + Anthropic)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=tgbot
+Group=tgbot
+WorkingDirectory=/opt/tg-solver-bot
+EnvironmentFile=/opt/tg-solver-bot/.env
+ExecStart=/opt/tg-solver-bot/.venv/bin/python -m bot.main
+Restart=always
+RestartSec=5
+
+# Минимальное ужесточение sandbox
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=true
+ReadWritePaths=/opt/tg-solver-bot/data /opt/tg-solver-bot
+
+[Install]
+WantedBy=multi-user.target

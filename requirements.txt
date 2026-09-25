@@ -1,0 +1,11 @@
+# Telegram-бот «Решатель задач» — зависимости
+aiogram>=3.13,<4.0
+anthropic>=0.40,<1.0
+# Бесплатный провайдер по умолчанию (PROVIDER=gemini)
+google-genai>=1.0,<2.0
+aiosqlite>=0.20,<1.0
+python-dotenv>=1.0,<2.0
+Pillow>=10.4,<12.0
+aiohttp>=3.10,<4.0
+# Для TELEGRAM_PROXY=socks5://... (http-прокси работает без него)
+aiohttp-socks>=0.9,<1.0

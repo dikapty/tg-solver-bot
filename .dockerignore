@@ -1,0 +1,17 @@
+# В образ не должны попадать секреты, БД, логи и локальное окружение
+.env
+.git
+.gitignore
+data/
+*.db
+*.log
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+.idea/
+.vscode/
+.DS_Store
+deploy/
+README.md
+docker-compose.yml

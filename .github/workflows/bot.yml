@@ -1,0 +1,40 @@
+name: tg-bot
+
+# Бот работает 24/7 как долгоживущий job. Расписание перезапускает его
+# каждые ~5 часов (лимит одного job на GitHub Actions — 6 часов):
+# новый запуск отменяет предыдущий (concurrency), разрыв — меньше минуты,
+# сообщения Telegram за это время не теряются (копятся в очереди обновлений).
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "0 */5 * * *"
+
+# Одна группа: параллельный запуск отменяет предыдущий,
+# чтобы два поллинга не конфликтовали (Telegram 409)
+concurrency:
+  group: tg-solver-bot
+  cancel-in-progress: true
+
+jobs:
+  bot:
+    runs-on: ubuntu-latest
+    timeout-minutes: 350
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run bot
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          PROVIDER: gemini
+          DB_PATH: data/bot.db
+        run: python -m bot.main

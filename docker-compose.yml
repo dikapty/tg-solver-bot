@@ -1,0 +1,19 @@
+services:
+  bot:
+    build: .
+    container_name: tg-solver-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    environment:
+      # Внутри контейнера БД всегда лежит в смонтированном volume
+      - DB_PATH=/app/data/bot.db
+    volumes:
+      # SQLite переживает пересоздание контейнера
+      - bot-data:/app/data
+    ports:
+      # Открываем порт только для webhook-режима; для polling можно убрать
+      - "8080:8080"
+
+volumes:
+  bot-data:
