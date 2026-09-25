@@ -25,6 +25,7 @@ from aiogram.types import BufferedInputFile, Message
 from ..config import Config
 from ..db import Database
 from ..keyboards import main_menu_kb, post_answer_kb
+from ..services.admin_store import AdminStore
 from ..services.ai import AIError, AIRateLimited, AIService, make_image_block
 from ..services.image import ImageTooLargeError, UnsupportedImageError, prepare_image
 from ..services.limiter import UserLimiter
@@ -51,6 +52,7 @@ class _Deps:
     ai: AIService
     limiter: UserLimiter
     config: Config
+    admin_store: "AdminStore"
 
 
 @dataclass
@@ -61,6 +63,7 @@ class _AlbumEntry:
     caption: str = ""
     chat_id: int = 0
     user_id: int = 0
+    username: str | None = None
     task: asyncio.Task | None = None
 
 
@@ -88,6 +91,7 @@ class AlbumCollector:
                 entry = _AlbumEntry(
                     chat_id=message.chat.id,
                     user_id=message.from_user.id,
+                    username=message.from_user.username,
                 )
                 self._groups[group_id] = entry
                 first = True
@@ -119,6 +123,7 @@ class AlbumCollector:
                 user_id=entry.user_id,
                 text=entry.caption,
                 file_ids=entry.file_ids[:MAX_IMAGES_PER_REQUEST],
+                username=entry.username,
             )
         except Exception:
             logger.exception("Необработанная ошибка при обработке альбома %s", group_id)
@@ -212,19 +217,21 @@ async def _process_request(
     user_id: int,
     text: str,
     file_ids: list[str],
+    username: str | None = None,
 ) -> None:
     """Полный цикл обработки одного задания."""
     bot, db, limiter, config = deps.bot, deps.db, deps.limiter, deps.config
 
-    # --- Дневной лимит -------------------------------------------------------
-    requests_today = await db.count_requests_today(user_id)
-    if requests_today >= config.daily_limit:
-        await bot.send_message(
-            chat_id,
-            f"😔 Вы исчерпали дневной лимит ({config.daily_limit} запросов к ИИ в сутки). "
-            "Лимит обновляется в 00:00 UTC — приходите завтра!",
-        )
-        return
+    # --- Дневной лимит (админы — без ограничений) ------------------------------
+    if not deps.admin_store.is_admin(user_id, username):
+        requests_today = await db.count_requests_today(user_id)
+        if requests_today >= config.daily_limit:
+            await bot.send_message(
+                chat_id,
+                f"😔 Вы исчерпали дневной лимит ({config.daily_limit} запросов к ИИ в сутки). "
+                "Лимит обновляется в 00:00 UTC — приходите завтра!",
+            )
+            return
 
     # --- Антиспам: один одновременный запрос на пользователя -----------------
     if limiter.is_busy(user_id):
@@ -337,9 +344,16 @@ async def _handle_task(
 
 # ------------------------------------------------------------------- хэндлеры
 
-def _deps_from_workflow(bot: Bot, db: Database, ai: AIService, limiter: UserLimiter, config: Config) -> _Deps:
+def _deps_from_workflow(
+    bot: Bot,
+    db: Database,
+    ai: AIService,
+    limiter: UserLimiter,
+    config: Config,
+    admin_store: AdminStore,
+) -> _Deps:
     """Собрать зависимости из параметров, внедрённых aiogram из workflow_data."""
-    return _Deps(bot=bot, db=db, ai=ai, limiter=limiter, config=config)
+    return _Deps(bot=bot, db=db, ai=ai, limiter=limiter, config=config, admin_store=admin_store)
 
 
 @router.message(F.photo)
@@ -350,11 +364,12 @@ async def handle_photo(
     ai: AIService,
     limiter: UserLimiter,
     config: Config,
+    admin_store: AdminStore,
 ) -> None:
     """Фото (одиночное или часть альбома), возможно с подписью."""
     if message.from_user is None or message.photo is None:
         return
-    deps = _deps_from_workflow(bot, db, ai, limiter, config)
+    deps = _deps_from_workflow(bot, db, ai, limiter, config, admin_store)
 
     # Фото из альбома — копим и обрабатываем одним запросом
     if message.media_group_id is not None:
@@ -367,6 +382,7 @@ async def handle_photo(
         user_id=message.from_user.id,
         text=message.caption or "",
         file_ids=[message.photo[-1].file_id],
+        username=message.from_user.username,
     )
 
 
@@ -378,6 +394,7 @@ async def handle_document(
     ai: AIService,
     limiter: UserLimiter,
     config: Config,
+    admin_store: AdminStore,
 ) -> None:
     """Документ: принимаем только изображения (jpg/png/webp/gif, отправленные «как файл»)."""
     if message.from_user is None or message.document is None:
@@ -392,11 +409,12 @@ async def handle_document(
         return
 
     await _process_request(
-        _deps_from_workflow(bot, db, ai, limiter, config),
+        _deps_from_workflow(bot, db, ai, limiter, config, admin_store),
         chat_id=message.chat.id,
         user_id=message.from_user.id,
         text=message.caption or "",
         file_ids=[message.document.file_id],
+        username=message.from_user.username,
     )
 
 
@@ -408,6 +426,7 @@ async def handle_text(
     ai: AIService,
     limiter: UserLimiter,
     config: Config,
+    admin_store: AdminStore,
 ) -> None:
     """Обычное текстовое задание."""
     if message.from_user is None or message.text is None:
@@ -424,9 +443,10 @@ async def handle_text(
         return
 
     await _process_request(
-        _deps_from_workflow(bot, db, ai, limiter, config),
+        _deps_from_workflow(bot, db, ai, limiter, config, admin_store),
         chat_id=message.chat.id,
         user_id=message.from_user.id,
         text=message.text,
         file_ids=[],
+        username=message.from_user.username,
     )

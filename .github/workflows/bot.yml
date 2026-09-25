@@ -39,4 +39,9 @@ jobs:
           DAILY_LIMIT: ${{ secrets.DAILY_LIMIT }}
           PROVIDER: gemini
           DB_PATH: data/bot.db
+          # Постоянное хранение админов, добавленных через /add_admin:
+          # бот коммитит admins.json в этот репозиторий через GitHub API
+          ADMINS_REPO_TOKEN: ${{ secrets.ADMINS_REPO_TOKEN }}
+          ADMINS_REPO: ${{ github.repository }}
+          ADMINS_FILE: admins.json
         run: python -m bot.main

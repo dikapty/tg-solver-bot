@@ -12,6 +12,7 @@ from .db import Database
 from .handlers import get_routers
 from .handlers.tasks import collector
 from .keyboards import BOT_COMMANDS
+from .services.admin_store import AdminStore
 from .services.ai import AIService
 from .services.limiter import UserLimiter
 from .utils import setup_logging
@@ -19,14 +20,16 @@ from .utils import setup_logging
 logger = logging.getLogger(__name__)
 
 
-async def on_startup(bot: Bot) -> None:
-    """Действия при старте: логируем режим и публикуем меню команд Telegram."""
+async def on_startup(bot: Bot, admin_store: AdminStore) -> None:
+    """Действия при старте: логируем режим, публикуем команды, грузим админов."""
     logger.info("Бот запущен: %s", await bot.get_me())
     # Синяя кнопка «Menu» в клиентах Telegram — официальный список команд
     try:
         await bot.set_my_commands(BOT_COMMANDS)
     except Exception:
         logger.warning("Не удалось опубликовать меню команд", exc_info=True)
+    # Динамические админы (добавленные через /add_admin) — из файла в репозитории
+    await admin_store.load()
 
 
 async def on_shutdown(bot: Bot, db: Database, ai: AIService) -> None:
@@ -61,11 +64,13 @@ def build_bot_and_dispatcher(config: Config) -> tuple[Bot, Dispatcher]:
     db = Database(config.db_path)
     ai = AIService(config)
     limiter = UserLimiter()
+    admin_store = AdminStore(config)
 
     dp["db"] = db
     dp["ai"] = ai
     dp["limiter"] = limiter
     dp["config"] = config
+    dp["admin_store"] = admin_store
 
     for router in get_routers():
         dp.include_router(router)

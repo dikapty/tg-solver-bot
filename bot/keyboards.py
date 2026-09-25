@@ -102,4 +102,7 @@ BOT_COMMANDS = [
     BotCommand(command="clear", description="Очистить контекст диалога"),
     BotCommand(command="help", description="Справка"),
     BotCommand(command="admin_stats", description="Статистика бота (админы)"),
+    BotCommand(command="admins", description="Список админов (админы)"),
+    BotCommand(command="add_admin", description="Добавить админа (админы)"),
+    BotCommand(command="remove_admin", description="Убрать админа (админы)"),
 ]

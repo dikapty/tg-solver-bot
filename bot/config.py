@@ -82,9 +82,21 @@ class Config:
     # Порт мини-сервера «живости» (GET / → OK) для хостингов вроде HuggingFace Space.
     # 0 — выключен. В режиме webhook не используется (там уже есть aiohttp-сервер).
     health_port: int
+    # --- Хранение динамических админов (добавленных через /add_admin) ---
+    # Токен GitHub с правом repo (обычно тот же PAT, что для git push).
+    # Пусто — динамические админы живут только до перезапуска.
+    admins_repo_token: str = ""
+    # Репозиторий «owner/name», в котором лежит файл со списком админов
+    admins_repo: str = ""
+    # Имя файла со списком (в корне репозитория)
+    admins_file: str = "admins.json"
 
     def is_admin(self, user_id: int, username: str | None = None) -> bool:
-        """Проверить администратора по числовому ID или username (без учёта регистра)."""
+        """Проверить администратора по числовому ID или username (без учёта регистра).
+
+        Это только СТАТИЧЕСКИЙ список из ADMIN_IDS; динамических админов
+        (добавленных через /add_admin) учитывает AdminStore.is_admin.
+        """
         if user_id in self.admin_ids:
             return True
         if username:
@@ -143,4 +155,7 @@ def load_config() -> Config:
         # PaaS-хостинги (Render и подобные) сами задают порт через PORT;
         # health-сервер на нём нужен, чтобы сервис не считали упавшим/заснувшим
         health_port=_get_int("HEALTH_PORT", _get_int("PORT", 0)),
+        admins_repo_token=os.getenv("ADMINS_REPO_TOKEN", "").strip(),
+        admins_repo=os.getenv("ADMINS_REPO", "").strip(),
+        admins_file=os.getenv("ADMINS_FILE", "").strip() or "admins.json",
     )
