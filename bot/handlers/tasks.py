@@ -24,6 +24,7 @@ from aiogram.types import BufferedInputFile, Message
 
 from ..config import Config
 from ..db import Database
+from ..keyboards import main_menu_kb, post_answer_kb
 from ..services.ai import AIError, AIRateLimited, AIService, make_image_block
 from ..services.image import ImageTooLargeError, UnsupportedImageError, prepare_image
 from ..services.limiter import UserLimiter
@@ -158,7 +159,12 @@ async def _typing_indicator(bot: Bot, chat_id: int, action: str = ChatAction.TYP
 
 
 async def _send_answer(bot: Bot, chat_id: int, text: str, reply_image: bool) -> None:
-    """Отправить ответ: PNG-картинкой (если включена опция) или текстом с разбиением."""
+    """Отправить ответ: PNG-картинкой (если включена опция) или текстом с разбиением.
+
+    К последнему сообщению прикрепляется inline-меню (🏠 Меню, ⚙️ Настройки,
+    🧹 Очистить контекст, 📊 Статистика), чтобы после решения можно было
+    вернуться в главное меню одним нажатием.
+    """
     if reply_image:
         try:
             await bot.send_chat_action(chat_id, ChatAction.UPLOAD_PHOTO)
@@ -168,6 +174,7 @@ async def _send_answer(bot: Bot, chat_id: int, text: str, reply_image: bool) -> 
                 chat_id,
                 BufferedInputFile(png, filename="answer.png"),
                 caption="🖼 Ответ картинкой (отключается в /mode)",
+                reply_markup=post_answer_kb(),
             )
             return
         except Exception:
@@ -176,13 +183,15 @@ async def _send_answer(bot: Bot, chat_id: int, text: str, reply_image: bool) -> 
     chunks = split_message(text)
     if not chunks:
         chunks = ["(пустой ответ)"]
-    for chunk in chunks:
+    for index, chunk in enumerate(chunks):
+        # Меню — только под последним сообщением ответа
+        markup = post_answer_kb() if index == len(chunks) - 1 else None
         try:
-            await bot.send_message(chat_id, chunk)
+            await bot.send_message(chat_id, chunk, reply_markup=markup)
         except TelegramBadRequest as exc:
             # Если Telegram не принял сообщение (например, из-за разметки) — шлём обрезанное
             logger.warning("Не удалось отправить сообщение: %s", exc)
-            await bot.send_message(chat_id, chunk[:4096])
+            await bot.send_message(chat_id, chunk[:4096], reply_markup=markup)
 
 
 def _describe_request_for_history(text: str, images_count: int) -> str:
@@ -278,6 +287,7 @@ async def _handle_task(
             await bot.send_message(
                 chat_id,
                 "Пришлите задание: текст, фото или фото с подписью. /help — справка.",
+                reply_markup=main_menu_kb(),
             )
             return
 
@@ -407,7 +417,9 @@ async def handle_text(
     # считаем неизвестными командами, а не заданиями
     if message.text.startswith("/"):
         await message.answer(
-            "Не знаю такой команды. Доступные команды: /start, /help, /mode, /clear, /stats."
+            "Не знаю такой команды. Доступные команды: /start, /menu, /help, "
+            "/mode, /clear, /stats.",
+            reply_markup=main_menu_kb(),
         )
         return
 

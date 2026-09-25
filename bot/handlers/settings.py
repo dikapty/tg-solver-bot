@@ -19,8 +19,17 @@ router = Router(name="settings")
 CB_MODE_PREFIX = "mode"
 CB_IMAGE_PREFIX = "img"
 
+SETTINGS_TEXT = (
+    "⚙️ Выберите формат ответа:\n\n"
+    "• Кратко — только ответ и минимум пояснений\n"
+    "• Подробно — пошаговое решение (по умолчанию)\n"
+    "• Как объяснить ребёнку — простыми словами и аналогиями\n\n"
+    "🖼 «Картинка» — присылать ответ в виде PNG-изображения "
+    "(удобно, когда текст плохо читается)."
+)
 
-def _settings_keyboard(current_mode: str, reply_image: bool) -> InlineKeyboardMarkup:
+
+def settings_keyboard(current_mode: str, reply_image: bool) -> InlineKeyboardMarkup:
     """Inline-клавиатура настроек: режимы ответа + переключатель картинки."""
     mode_rows = []
     for mode_key in (MODE_BRIEF, MODE_DETAILED, MODE_CHILD):
@@ -44,13 +53,8 @@ async def cmd_mode(message: Message, db: Database) -> None:
     await db.ensure_user(message.from_user.id)
     mode, reply_image = await db.get_user(message.from_user.id)
     await message.answer(
-        "⚙️ Выберите формат ответа:\n\n"
-        "• Кратко — только ответ и минимум пояснений\n"
-        "• Подробно — пошаговое решение (по умолчанию)\n"
-        "• Как объяснить ребёнку — простыми словами и аналогиями\n\n"
-        "🖼 «Картинка» — присылать ответ в виде PNG-изображения "
-        "(удобно, когда текст плохо читается).",
-        reply_markup=_settings_keyboard(mode, reply_image),
+        SETTINGS_TEXT,
+        reply_markup=settings_keyboard(mode, reply_image),
     )
 
 
@@ -73,7 +77,7 @@ async def cb_set_mode(callback: CallbackQuery, db: Database) -> None:
     _, reply_image = await db.get_user(callback.from_user.id)
     if callback.message is not None:
         await callback.message.edit_reply_markup(
-            reply_markup=_settings_keyboard(mode_key, reply_image)
+            reply_markup=settings_keyboard(mode_key, reply_image)
         )
     await callback.answer(f"Режим «{MODE_TITLES[mode_key]}» выбран ✅")
 
@@ -96,6 +100,6 @@ async def cb_toggle_image(callback: CallbackQuery, db: Database) -> None:
 
     if callback.message is not None:
         await callback.message.edit_reply_markup(
-            reply_markup=_settings_keyboard(mode, new_state)
+            reply_markup=settings_keyboard(mode, new_state)
         )
     await callback.answer(f"Ответ картинкой: {'включён 🖼' if new_state else 'выключен'}")

@@ -11,6 +11,7 @@ from .config import Config, load_config
 from .db import Database
 from .handlers import get_routers
 from .handlers.tasks import collector
+from .keyboards import BOT_COMMANDS
 from .services.ai import AIService
 from .services.limiter import UserLimiter
 from .utils import setup_logging
@@ -19,8 +20,13 @@ logger = logging.getLogger(__name__)
 
 
 async def on_startup(bot: Bot) -> None:
-    """Действия при старте (логируем режим работы)."""
+    """Действия при старте: логируем режим и публикуем меню команд Telegram."""
     logger.info("Бот запущен: %s", await bot.get_me())
+    # Синяя кнопка «Menu» в клиентах Telegram — официальный список команд
+    try:
+        await bot.set_my_commands(BOT_COMMANDS)
+    except Exception:
+        logger.warning("Не удалось опубликовать меню команд", exc_info=True)
 
 
 async def on_shutdown(bot: Bot, db: Database, ai: AIService) -> None:
