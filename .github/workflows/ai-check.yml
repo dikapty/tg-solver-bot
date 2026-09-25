@@ -1,0 +1,55 @@
+name: ai-check
+
+# Одноразовая проверка: реальный вызов ИИ (Gemini) кодом бота
+# с сервера GitHub (США). Запускается вручную, результат — в логах.
+on:
+  workflow_dispatch:
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: AI call test
+        env:
+          BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
+          GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          DAILY_LIMIT: ${{ secrets.DAILY_LIMIT }}
+          PROVIDER: gemini
+          DB_PATH: /tmp/check-bot.db
+        run: |
+          python - <<'PY'
+          import asyncio
+          from bot.config import load_config
+          from bot.services.ai import AIService
+
+          async def main():
+              cfg = load_config()
+              print("provider:", cfg.provider, "| model:", cfg.model_name or "(default)")
+              svc = AIService(cfg)
+              try:
+                  resp = await svc.solve(
+                      mode="brief",
+                      history=[],
+                      content="Сколько будет 7*8? Ответь только числом.",
+                  )
+                  print("AI_CHECK_OK model=%s tokens_in=%s tokens_out=%s" % (
+                      resp.model, resp.input_tokens, resp.output_tokens))
+                  print("AI_CHECK_ANSWER:", resp.text[:200])
+              finally:
+                  await svc.close()
+
+          asyncio.run(main())
+          PY
