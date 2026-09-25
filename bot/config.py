@@ -26,7 +26,7 @@ def _get_int(name: str, default: int) -> int:
 
 
 def _get_admin_ids() -> frozenset[int]:
-    """Список ID администраторов из ADMIN_IDS (через запятую или точку с запятой)."""
+    """Числовые ID администраторов из ADMIN_IDS (через запятую или точку с запятой)."""
     raw = os.getenv("ADMIN_IDS", "")
     ids: set[int] = set()
     for chunk in raw.replace(";", ",").split(","):
@@ -34,6 +34,21 @@ def _get_admin_ids() -> frozenset[int]:
         if chunk.isdigit():
             ids.add(int(chunk))
     return frozenset(ids)
+
+
+def _get_admin_usernames() -> frozenset[str]:
+    """Username администраторов из ADMIN_IDS (через запятую, с «@» или без).
+
+    Username удобнее ID (его знает сам пользователь), но его можно сменить —
+    поэтому поддерживаются оба формата. Регистр не учитывается.
+    """
+    raw = os.getenv("ADMIN_IDS", "")
+    names: set[str] = set()
+    for chunk in raw.replace(";", ",").split(","):
+        chunk = chunk.strip().lstrip("@")
+        if chunk and not chunk.isdigit():
+            names.add(chunk.lower())
+    return frozenset(names)
 
 
 # Модель по умолчанию для каждого провайдера (используется, если MODEL_NAME пуст)
@@ -54,6 +69,8 @@ class Config:
     model_name: str
     daily_limit: int
     admin_ids: frozenset[int]
+    # Username админов (без «@», нижний регистр) — альтернатива числовым ID
+    admin_usernames: frozenset[str]
     db_path: str
     use_webhook: bool
     webhook_url: str
@@ -65,6 +82,14 @@ class Config:
     # Порт мини-сервера «живости» (GET / → OK) для хостингов вроде HuggingFace Space.
     # 0 — выключен. В режиме webhook не используется (там уже есть aiohttp-сервер).
     health_port: int
+
+    def is_admin(self, user_id: int, username: str | None = None) -> bool:
+        """Проверить администратора по числовому ID или username (без учёта регистра)."""
+        if user_id in self.admin_ids:
+            return True
+        if username:
+            return username.lstrip("@").lower() in self.admin_usernames
+        return False
 
 
 def load_config() -> Config:
@@ -108,6 +133,7 @@ def load_config() -> Config:
         model_name=os.getenv("MODEL_NAME", "").strip() or default_model,
         daily_limit=max(1, _get_int("DAILY_LIMIT", 20)),
         admin_ids=_get_admin_ids(),
+        admin_usernames=_get_admin_usernames(),
         db_path=os.getenv("DB_PATH", "data/bot.db").strip() or "data/bot.db",
         use_webhook=_get_bool("USE_WEBHOOK", False),
         webhook_url=os.getenv("WEBHOOK_URL", "").strip(),

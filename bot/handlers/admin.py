@@ -18,12 +18,13 @@ router = Router(name="admin")
 
 @router.message(Command("admin_stats"))
 async def cmd_admin_stats(message: Message, db: Database, config: Config) -> None:
-    """Сводная статистика бота для администраторов."""
+    """Сводная статистика бота для администраторов (по ID или username)."""
     if message.from_user is None:
         return
-    if message.from_user.id not in config.admin_ids:
+    if not config.is_admin(message.from_user.id, message.from_user.username):
         logger.warning(
-            "Попытка доступа к /admin_stats от не-админа: id=%d", message.from_user.id
+            "Попытка доступа к /admin_stats от не-админа: id=%d username=%s",
+            message.from_user.id, message.from_user.username,
         )
         await message.answer("⛔ Эта команда доступна только администраторам.")
         return
