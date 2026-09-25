@@ -85,7 +85,7 @@ python -m bot.main
 | `ANTHROPIC_API_KEY` | — (для anthropic) | Ключ API Anthropic |
 | `MODEL_NAME` | пусто | Пусто — модель по умолчанию провайдера (`gemini-3.6-flash` / `claude-sonnet-5`) |
 | `DAILY_LIMIT` | `20` | Запросов к ИИ в сутки на пользователя |
-| `ADMIN_IDS` | пусто | ID админов через запятую (доступ к `/admin_stats`) |
+| `ADMIN_IDS` | пусто | Админы через запятую: числовой ID и/или username (`@user` или `user`); доступ к `/admin_stats` |
 | `DB_PATH` | `data/bot.db` | Путь к файлу SQLite |
 | `USE_WEBHOOK` | `false` | `true` — режим webhook |
 | `WEBHOOK_URL` | пусто | Полный https-URL, например `https://bot.example.com/webhook` |
