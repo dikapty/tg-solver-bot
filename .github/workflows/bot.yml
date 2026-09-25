@@ -35,6 +35,8 @@ jobs:
           BOT_TOKEN: ${{ secrets.BOT_TOKEN }}
           GEMINI_API_KEY: ${{ secrets.GEMINI_API_KEY }}
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          ADMIN_IDS: ${{ secrets.ADMIN_IDS }}
+          DAILY_LIMIT: ${{ secrets.DAILY_LIMIT }}
           PROVIDER: gemini
           DB_PATH: data/bot.db
         run: python -m bot.main
