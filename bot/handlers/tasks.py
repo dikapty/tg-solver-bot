@@ -20,11 +20,11 @@ from typing import Any
 from aiogram import Bot, F, Router
 from aiogram.enums import ChatAction
 from aiogram.exceptions import TelegramBadRequest
-from aiogram.types import BufferedInputFile, Message
+from aiogram.types import BufferedInputFile, CallbackQuery, Message
 
 from ..config import Config
 from ..db import Database
-from ..keyboards import main_menu_kb, post_answer_kb
+from ..keyboards import CB_RETRY_PREFIX, main_menu_kb, post_answer_kb, retry_kb
 from ..services.admin_store import AdminStore
 from ..services.ai import AIError, AIRateLimited, AIService, make_image_block
 from ..services.image import ImageTooLargeError, UnsupportedImageError, prepare_image
@@ -140,6 +140,12 @@ class AlbumCollector:
 # Единственный коллектор на процесс (используется роутером, зависимости ставит main.py)
 collector = AlbumCollector()
 
+# Кэш последнего задания каждого пользователя — для кнопки «🔄 Повторить»
+# после сбоя ИИ (текст + file_id фото; file_id бот может переиспользовать).
+# Хранится только в памяти: если процесс перезапущен, кнопка честно скажет
+# «пришлите задание ещё раз».
+_last_requests: dict[int, dict[str, Any]] = {}
+
 
 # --------------------------------------------------------------------- утилиты
 
@@ -221,6 +227,15 @@ async def _process_request(
 ) -> None:
     """Полный цикл обработки одного задания."""
     bot, db, limiter, config = deps.bot, deps.db, deps.limiter, deps.config
+
+    # Запоминаем задание для кнопки «🔄 Повторить» (на случай сбоя ИИ)
+    if text.strip() or file_ids:
+        _last_requests[user_id] = {
+            "chat_id": chat_id,
+            "text": text,
+            "file_ids": list(file_ids),
+            "username": username,
+        }
 
     # --- Дневной лимит (админы — без ограничений) ------------------------------
     if not deps.admin_store.is_admin(user_id, username):
@@ -311,17 +326,30 @@ async def _handle_task(
         try:
             result = await ai.solve(mode=mode, history=history, content=content_blocks)
         except AIRateLimited as exc:
-            await bot.send_message(chat_id, str(exc))
+            logger.warning(
+                "ИИ не ответил после всех попыток (user=%d): %s", user_id, exc.__cause__ or exc
+            )
+            await bot.send_message(
+                chat_id,
+                f"{exc}\n\nНажмите «🔄 Повторить» — я отправлю это же задание ещё раз.",
+                reply_markup=retry_kb(),
+            )
             return
         except AIError as exc:
-            await bot.send_message(chat_id, str(exc))
+            logger.warning("Отказ сервиса ИИ (user=%d): %s", user_id, exc)
+            await bot.send_message(
+                chat_id,
+                f"{exc}\n\nНажмите «🔄 Повторить» — я отправлю это же задание ещё раз.",
+                reply_markup=retry_kb(),
+            )
             return
         except Exception:
             logger.exception("Непредвиденная ошибка при обращении к ИИ (user=%d)", user_id)
             await bot.send_message(
                 chat_id,
-                "😥 Произошла непредвиденная ошибка — я записал её в лог. "
-                "Попробуйте ещё раз чуть позже.",
+                "😥 Произошла непредвиденная ошибка — я записал её в лог.\n\n"
+                "Нажмите «🔄 Повторить», чтобы попробовать ещё раз.",
+                reply_markup=retry_kb(),
             )
             return
 
@@ -449,4 +477,53 @@ async def handle_text(
         text=message.text,
         file_ids=[],
         username=message.from_user.username,
+    )
+
+
+# ------------------------------------------------------------------ повтор
+
+@router.callback_query(F.data.startswith(f"{CB_RETRY_PREFIX}:"))
+async def cb_retry(
+    callback: CallbackQuery,
+    bot: Bot,
+    db: Database,
+    ai: AIService,
+    limiter: UserLimiter,
+    config: Config,
+    admin_store: AdminStore,
+) -> None:
+    """Кнопка «🔄 Повторить»: заново отправить последнее задание пользователя.
+
+    Задание берётся из кэша _last_requests (заполняется при каждом запросе).
+    Если процесс бота перезапускался и кэш пуст — просим прислать задание снова.
+    Кнопка гасится после нажатия, чтобы повторный клик не запустил дубль.
+    """
+    if callback.from_user is None or callback.message is None:
+        await callback.answer("Ошибка", show_alert=True)
+        return
+
+    user_id = callback.from_user.id
+    cached = _last_requests.get(user_id)
+
+    # Убираем кнопку с нажатого сообщения (ошибка уже неактуальна)
+    try:
+        await callback.message.edit_reply_markup(reply_markup=None)
+    except TelegramBadRequest:
+        pass  # сообщение уже без кнопок или недоступно — не критично
+
+    if cached is None:
+        await callback.answer(
+            "Не нашёл последнее задание — пришлите его, пожалуйста, ещё раз.",
+            show_alert=True,
+        )
+        return
+
+    await callback.answer("🔄 Повторяю запрос…")
+    await _process_request(
+        _deps_from_workflow(bot, db, ai, limiter, config, admin_store),
+        chat_id=cached["chat_id"],
+        user_id=user_id,
+        text=cached["text"],
+        file_ids=cached["file_ids"],
+        username=cached.get("username") or callback.from_user.username,
     )

@@ -25,11 +25,34 @@ logger = logging.getLogger(__name__)
 MAX_OUTPUT_TOKENS = 16000
 GEMINI_MAX_OUTPUT_TOKENS = 8192
 
-# Число попыток при временных сбоях (rate limit, overload, timeout, 5xx)
-MAX_ATTEMPTS = 3
+# Число попыток при временных сбоях (rate limit, overload, timeout, 5xx).
+# Кратковременные 503/429 у Gemini обычно проходят за 10–60 секунд, поэтому
+# суммарное окно ретраев держим порядка минуты (пользователь всё это время
+# видит индикатор «печатает…»).
+MAX_ATTEMPTS = 6
 
-# Базовая задержка exponential backoff, секунд
+# Экспоненциальная задержка: базовая и максимальная, секунд
 BASE_BACKOFF_DELAY = 2.0
+MAX_BACKOFF_DELAY = 20.0
+
+# Сообщение, когда все попытки исчерпаны (к нему добавляется кнопка «Повторить»)
+EXHAUSTED_MESSAGE = (
+    "😥 Сервис ИИ не ответил: серверы модели перегружены или достигнут лимит "
+    "запросов. Я сделал несколько попыток — не повезло."
+)
+
+
+def _retry_after_seconds(exc: Exception) -> float | None:
+    """Значение заголовка Retry-After из ответа API, если сервер его прислал."""
+    response = getattr(exc, "response", None)
+    headers = getattr(response, "headers", None)
+    if not headers:
+        return None
+    raw = headers.get("retry-after") or headers.get("Retry-After")
+    try:
+        return float(raw)
+    except (TypeError, ValueError):
+        return None
 
 
 class AIError(Exception):
@@ -166,7 +189,9 @@ class AIService:
                 code = getattr(exc, "code", 0) or 0
                 if code == 429 or code >= 500:
                     last_error = exc
-                    delay = await self._sleep_backoff(attempt, type(exc).__name__)
+                    delay = await self._sleep_backoff(
+                        attempt, f"{type(exc).__name__} (HTTP {code})", _retry_after_seconds(exc)
+                    )
                     if delay is None:
                         break
                     continue
@@ -187,10 +212,10 @@ class AIService:
                     continue
                 raise
 
-        raise AIRateLimited(
-            "Сервис ИИ сейчас перегружен или ограничил количество запросов. "
-            "Пожалуйста, попробуйте ещё раз через пару минут."
-        ) from last_error
+        logger.error(
+            "Gemini: попытки исчерпаны (%d), последняя ошибка: %r", MAX_ATTEMPTS, last_error
+        )
+        raise AIRateLimited(EXHAUSTED_MESSAGE) from last_error
 
     def _to_gemini_contents(self, messages: list[dict]) -> list:
         """Конвертировать сообщения внутреннего формата в Content-объекты Gemini."""
@@ -268,7 +293,9 @@ class AIService:
                 anthropic.InternalServerError,
             ) as exc:
                 last_error = exc
-                delay = await self._sleep_backoff(attempt, type(exc).__name__)
+                delay = await self._sleep_backoff(
+                    attempt, type(exc).__name__, _retry_after_seconds(exc)
+                )
                 if delay is None:
                     break
                 continue
@@ -282,18 +309,30 @@ class AIService:
                 logger.error("Ошибка API (HTTP %d): %s", exc.status_code, exc)
                 raise AIError("Сервис ИИ временно недоступен. Попробуйте ещё раз позже.")
 
-        raise AIRateLimited(
-            "Сервис ИИ сейчас перегружен или ограничил количество запросов. "
-            "Пожалуйста, попробуйте ещё раз через пару минут."
-        ) from last_error
+        logger.error(
+            "Anthropic: попытки исчерпаны (%d), последняя ошибка: %r", MAX_ATTEMPTS, last_error
+        )
+        raise AIRateLimited(EXHAUSTED_MESSAGE) from last_error
 
     # ------------------------------------------------------------------ общее
 
-    async def _sleep_backoff(self, attempt: int, error_name: str) -> float | None:
-        """Подождать перед повтором; вернуть None, если попытки исчерпаны."""
+    async def _sleep_backoff(
+        self, attempt: int, error_name: str, retry_after: float | None = None
+    ) -> float | None:
+        """Подождать перед повтором; вернуть None, если попытки исчерпаны.
+
+        Приоритет задержки: заголовок Retry-After от API (если прислан) →
+        экспоненциальная с джиттером, ограниченная MAX_BACKOFF_DELAY.
+        """
         if attempt >= MAX_ATTEMPTS:
             return None
-        delay = BASE_BACKOFF_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1)
+        if retry_after is not None and 0 < retry_after <= 120:
+            delay = retry_after + random.uniform(0, 1)
+        else:
+            delay = min(
+                BASE_BACKOFF_DELAY * (2 ** (attempt - 1)) + random.uniform(0, 1),
+                MAX_BACKOFF_DELAY,
+            )
         logger.warning(
             "Временная ошибка API (%s), попытка %d/%d, повтор через %.1fс",
             error_name, attempt, MAX_ATTEMPTS, delay,

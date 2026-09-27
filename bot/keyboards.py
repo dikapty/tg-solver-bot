@@ -28,6 +28,31 @@ MENU_BUTTONS = frozenset({BTN_SOLVE, BTN_SETTINGS, BTN_STATS, BTN_CLEAR, BTN_HEL
 # --- Префикс callback_data для inline-навигации под ответами ----------------
 CB_MENU_PREFIX = "menu"
 
+# --- Кнопка повтора под сообщением об ошибке ИИ ------------------------------
+CB_RETRY_PREFIX = "retry"
+
+
+def retry_kb() -> InlineKeyboardMarkup:
+    """Клавиатура под сообщением «сервис ИИ не ответил»: повтор + выход в меню.
+
+    Нажатие «🔄 Повторить» заново отправляет ТО ЖЕ задание в ИИ (текст и фото
+    берутся из кэша последнего неудачного запроса) — пересылать ничего не нужно.
+    """
+    return InlineKeyboardMarkup(
+        inline_keyboard=[
+            [
+                InlineKeyboardButton(
+                    text="🔄 Повторить",
+                    callback_data=f"{CB_RETRY_PREFIX}:last",
+                ),
+                InlineKeyboardButton(
+                    text="🏠 Меню",
+                    callback_data=f"{CB_MENU_PREFIX}:home",
+                ),
+            ]
+        ]
+    )
+
 MENU_TEXT = """\
 🏠 Главное меню
 
